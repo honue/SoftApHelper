@@ -83,7 +83,7 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private boolean isConflictPrefix(Class<?> klass, Object thiz, IpPrefix prefix) throws Exception {
         Field field_mPrivateAddressCoordinator = ReflectUtils.findField(klass, "mPrivateAddressCoordinator");
-        // Android 15+, bypass
+        // Android 16+ no longer has mPrivateAddressCoordinator, bypass this check.
         if(field_mPrivateAddressCoordinator == null){
             XposedBridge.log("[" + TAG + "] [Warning]: [" + WIFI_HOST_IFACE_ADDR + "] field_mPrivateAddressCoordinator not found.");
             return false;
@@ -195,7 +195,7 @@ public class MainHook implements IXposedHookLoadPackage {
         else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.S) {
             // TODO
         }
-        // Android 13+
+        // Android 13-17
         else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
             try {
                 for (Constructor<?> ctor : SoftApConfiguration.class.getDeclaredConstructors()) {
@@ -261,32 +261,34 @@ public class MainHook implements IXposedHookLoadPackage {
                                 param.args[0] = false;
                             }
                         });
-
-
-                Class<?> klassAccessPoint = classLoader.loadClass("android.net.wifi.WifiConfiguration");
-                Method method_isMetered = ReflectUtils.findMethod(klass, "isMetered");
-                if (method_isMetered == null) {
-                    XposedBridge.log("[" + TAG + "] [Error]: [" + "isMetered" + "] not found in class " + klassAccessPoint.getName());
-                }else {
-                    XposedBridge.log("[" + TAG + "] [Success]: [" + "isMetered" + "] found in " + lpparam.processName);
-                }
-
-                XposedBridge.hookMethod(method,
-                        new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(XC_MethodHook.MethodHookParam param) throws Throwable {
-                                super.beforeHookedMethod(param);
-//                                param.setResult(false);
-                                XposedBridge.log("[" + TAG + "] [Success]: [" + "isMetered" + "] stack:\n" + StackUtils.getStackTraceString());
-
-                            }
-                        });
-
-
-
-
             } catch (Exception exception) {
 //                XposedBridge.log("[" + TAG + "] exception in " + lpparam.packageName + ": " + exception);
+            }
+        }
+
+        // Android 16-17: prevent hostapd from advertising the Soft AP as a
+        // CHARGEABLE_PUBLIC_NETWORK through the 802.11u Interworking IE.
+        if (Build.VERSION.SDK_INT >= 36 && "android".equals(lpparam.packageName)) {
+            try {
+                Class<?> wifiNativeClass = classLoader.loadClass("com.android.server.wifi.WifiNative");
+                for (Method method : wifiNativeClass.getDeclaredMethods()) {
+                    Class<?>[] parameterTypes = method.getParameterTypes();
+                    if ("startSoftAp".equals(method.getName())
+                            && parameterTypes.length > 2
+                            && parameterTypes[2] == boolean.class) {
+                        XposedBridge.hookMethod(method, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(XC_MethodHook.MethodHookParam param) {
+                                param.args[2] = false;
+                                XposedBridge.log("[" + TAG + "] [Success Edit]: hostapd isMetered=false");
+                            }
+                        });
+                        XposedBridge.log("[" + TAG + "] [Success]: [WifiNative.startSoftAp] found in "
+                                + lpparam.processName);
+                    }
+                }
+            } catch (Exception exception) {
+                XposedBridge.log("[" + TAG + "] [Error]: [WifiNative.startSoftAp] " + exception);
             }
         }
 

@@ -1,15 +1,15 @@
 # SoftApHelper (Xposed)
 
-SoftAp static server IP(v4) for Android 9+
+SoftAp static server IP(v4) for Android 9-17
 
-SoftAp type hide for Android 10+
+SoftAp type hide for Android 10-17
 
-SoftAp 5G channel and bandwidth lock for Android 13+ 
+SoftAp 5G channel and bandwidth lock for Android 13-17
 
 ## 功能
-1. 固定IP地址 (Android 9+)
-2. 隐藏热点类型 (Android 10+)
-3. 锁定5G信道和频宽 (Android 13+)
+1. 固定IP地址 (Android 9-17)
+2. 隐藏热点类型 (Android 10-17)
+3. 锁定5G信道和频宽 (Android 13-17)
 
 ## 安卓14已知问题：
 部分安卓14系统由于存在缓存，需要手动**重新优化Tethering**，模块才能生效
