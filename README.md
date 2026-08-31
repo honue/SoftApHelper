@@ -134,7 +134,8 @@ private LinkAddress requestIpv4Address(final int scope, final boolean useLastAdd
 `android.net.dhcp.DhcpServingParamsParcelExt`的`setMetered`函数。
 
 Android 16+ 同时关闭 Hostapd 的计费网络标记，并移除 Apple
-`00:17:F2:06` 移动热点 Vendor IE，使设备标识保持为普通网络。
+`00:17:F2:06` 移动热点 Vendor IE；对于在原生层追加该标记的系统，
+热点启动后会再次清空 Hostapd `vendor_elements` 并刷新 Beacon。
 
 ```java
     /**

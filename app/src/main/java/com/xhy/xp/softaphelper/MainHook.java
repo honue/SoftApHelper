@@ -100,6 +100,15 @@ public class MainHook implements IXposedHookLoadPackage {
                             XposedBridge.log("[" + TAG
                                     + "] [Success Edit]: hostapd isMetered=false");
                         }
+
+                        @Override
+                        protected void afterHookedMethod(XC_MethodHook.MethodHookParam param) {
+                            Object result = param.getResult();
+                            if (result instanceof Integer && (int) result == 0
+                                    && param.args[0] instanceof String) {
+                                clearNativeHotspotIdentity((String) param.args[0]);
+                            }
+                        }
                     });
                     wifiNativeHooked = true;
                     XposedBridge.log("[" + TAG
@@ -111,6 +120,42 @@ public class MainHook implements IXposedHookLoadPackage {
         } catch (Exception exception) {
             XposedBridge.log("[" + TAG + "] [Error]: [WifiNative.startSoftAp] " + exception);
         }
+    }
+
+    private static int runHostapdCli(String interfaceName, String... arguments)
+            throws Exception {
+        ArrayList<String> command = new ArrayList<>();
+        command.add("/vendor/bin/hostapd_cli");
+        command.add("-i");
+        command.add(interfaceName);
+        command.addAll(Arrays.asList(arguments));
+
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start();
+        int exitCode = process.waitFor();
+        process.destroy();
+        return exitCode;
+    }
+
+    private static void clearNativeHotspotIdentity(String interfaceName) {
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+                int vendorResult = runHostapdCli(interfaceName,
+                        "set", "vendor_elements", "");
+                int interworkingResult = runHostapdCli(interfaceName,
+                        "set", "interworking", "0");
+                int beaconResult = runHostapdCli(interfaceName, "update_beacon");
+                XposedBridge.log("[" + TAG + "] [Success Edit]: native hotspot identity "
+                        + "cleared, vendor=" + vendorResult
+                        + ", interworking=" + interworkingResult
+                        + ", beacon=" + beaconResult);
+            } catch (Exception exception) {
+                XposedBridge.log("[" + TAG
+                        + "] [Error]: clear native hotspot identity " + exception);
+            }
+        }, "SoftApHelper-hostapd").start();
     }
 
     private static byte[] removeAppleMobileHotspotIe(byte[] vendorElements) {
