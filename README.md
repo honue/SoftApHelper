@@ -133,6 +133,9 @@ private LinkAddress requestIpv4Address(final int scope, final boolean useLastAdd
 ## 隐藏热点类型
 `android.net.dhcp.DhcpServingParamsParcelExt`的`setMetered`函数。
 
+Android 16+ 同时关闭 Hostapd 的计费网络标记，并移除 Apple
+`00:17:F2:06` 移动热点 Vendor IE，使设备标识保持为普通网络。
+
 ```java
     /**
      * Set whether the DHCP server should send the ANDROID_METERED vendor-specific option.

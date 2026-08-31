@@ -64,6 +64,7 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private static HashMap<Integer, String> AddressMap = new HashMap<>();
     private static boolean wifiNativeHooked = false;
+    private static boolean hostapdNetworkParamsHooked = false;
 
 
     public static final int BAND_5GHZ = 1 << 1;
@@ -109,6 +110,90 @@ public class MainHook implements IXposedHookLoadPackage {
             XposedBridge.log("[" + TAG + "] [Error]: [WifiNative.startSoftAp] not found");
         } catch (Exception exception) {
             XposedBridge.log("[" + TAG + "] [Error]: [WifiNative.startSoftAp] " + exception);
+        }
+    }
+
+    private static byte[] removeAppleMobileHotspotIe(byte[] vendorElements) {
+        if (vendorElements == null || vendorElements.length < 6) return vendorElements;
+
+        byte[] filtered = new byte[vendorElements.length];
+        int sourceOffset = 0;
+        int targetOffset = 0;
+        boolean removed = false;
+
+        while (sourceOffset + 2 <= vendorElements.length) {
+            int payloadLength = vendorElements[sourceOffset + 1] & 0xff;
+            int elementLength = payloadLength + 2;
+            if (sourceOffset + elementLength > vendorElements.length) {
+                return vendorElements;
+            }
+
+            boolean isAppleMobileHotspot = (vendorElements[sourceOffset] & 0xff) == 0xdd
+                    && payloadLength >= 4
+                    && (vendorElements[sourceOffset + 2] & 0xff) == 0x00
+                    && (vendorElements[sourceOffset + 3] & 0xff) == 0x17
+                    && (vendorElements[sourceOffset + 4] & 0xff) == 0xf2
+                    && (vendorElements[sourceOffset + 5] & 0xff) == 0x06;
+
+            if (isAppleMobileHotspot) {
+                removed = true;
+            } else {
+                System.arraycopy(vendorElements, sourceOffset, filtered, targetOffset,
+                        elementLength);
+                targetOffset += elementLength;
+            }
+            sourceOffset += elementLength;
+        }
+
+        if (!removed || sourceOffset != vendorElements.length) return vendorElements;
+        return Arrays.copyOf(filtered, targetOffset);
+    }
+
+    private static synchronized void hookHostapdNetworkParams(ClassLoader classLoader) {
+        if (hostapdNetworkParamsHooked) return;
+
+        try {
+            Class<?> hostapdHalClass = classLoader.loadClass(
+                    "com.android.server.wifi.HostapdHalAidlImp");
+            for (Method method : hostapdHalClass.getDeclaredMethods()) {
+                if (!"prepareNetworkParams".equals(method.getName())) continue;
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(XC_MethodHook.MethodHookParam param)
+                            throws IllegalAccessException {
+                        Object networkParams = param.getResult();
+                        if (networkParams == null) return;
+
+                        Field meteredField = ReflectUtils.findField(
+                                networkParams.getClass(), "isMetered");
+                        if (meteredField != null) {
+                            meteredField.setBoolean(networkParams, false);
+                        }
+
+                        Field vendorElementsField = ReflectUtils.findField(
+                                networkParams.getClass(), "vendorElements");
+                        if (vendorElementsField == null) return;
+
+                        byte[] original = (byte[]) vendorElementsField.get(networkParams);
+                        byte[] filtered = removeAppleMobileHotspotIe(original);
+                        if (filtered != original) {
+                            vendorElementsField.set(networkParams, filtered);
+                            XposedBridge.log("[" + TAG + "] [Success Edit]: removed Apple "
+                                    + "mobile hotspot vendor IE (00:17:F2:06)");
+                        }
+                    }
+                });
+                hostapdNetworkParamsHooked = true;
+                XposedBridge.log("[" + TAG
+                        + "] [Success]: [HostapdHalAidlImp.prepareNetworkParams] hooked");
+                return;
+            }
+            XposedBridge.log("[" + TAG
+                    + "] [Error]: [HostapdHalAidlImp.prepareNetworkParams] not found");
+        } catch (Exception exception) {
+            XposedBridge.log("[" + TAG
+                    + "] [Error]: [HostapdHalAidlImp.prepareNetworkParams] " + exception);
         }
     }
 
@@ -313,7 +398,9 @@ public class MainHook implements IXposedHookLoadPackage {
                                 String jarPath = param.args[1] instanceof String
                                         ? (String) param.args[1] : "";
                                 if (service != null && jarPath.contains("com.android.wifi")) {
-                                    hookWifiNativeStartSoftAp(service.getClass().getClassLoader());
+                                    ClassLoader wifiClassLoader = service.getClass().getClassLoader();
+                                    hookWifiNativeStartSoftAp(wifiClassLoader);
+                                    hookHostapdNetworkParams(wifiClassLoader);
                                 }
                             }
                         });
