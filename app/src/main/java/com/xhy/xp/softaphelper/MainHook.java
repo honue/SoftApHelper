@@ -63,6 +63,7 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final boolean shouldStaticBSSID = false;
 
     private static HashMap<Integer, String> AddressMap = new HashMap<>();
+    private static boolean wifiNativeHooked = false;
 
 
     public static final int BAND_5GHZ = 1 << 1;
@@ -79,6 +80,36 @@ public class MainHook implements IXposedHookLoadPackage {
         AddressMap.put(TETHERING_BLUETOOTH, BT_HOST_IFACE_ADDRESS);
         AddressMap.put(TETHERING_WIFI_P2P, P2P_HOST_IFACE_ADDRESS);
         AddressMap.put(TETHERING_ETHERNET, ETHERNET_HOST_IFACE_ADDRESS);
+    }
+
+    private static synchronized void hookWifiNativeStartSoftAp(ClassLoader classLoader) {
+        if (wifiNativeHooked) return;
+
+        try {
+            Class<?> wifiNativeClass = classLoader.loadClass("com.android.server.wifi.WifiNative");
+            for (Method method : wifiNativeClass.getDeclaredMethods()) {
+                Class<?>[] parameterTypes = method.getParameterTypes();
+                if ("startSoftAp".equals(method.getName())
+                        && parameterTypes.length > 2
+                        && parameterTypes[2] == boolean.class) {
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(XC_MethodHook.MethodHookParam param) {
+                            param.args[2] = false;
+                            XposedBridge.log("[" + TAG
+                                    + "] [Success Edit]: hostapd isMetered=false");
+                        }
+                    });
+                    wifiNativeHooked = true;
+                    XposedBridge.log("[" + TAG
+                            + "] [Success]: [WifiNative.startSoftAp] hooked");
+                    return;
+                }
+            }
+            XposedBridge.log("[" + TAG + "] [Error]: [WifiNative.startSoftAp] not found");
+        } catch (Exception exception) {
+            XposedBridge.log("[" + TAG + "] [Error]: [WifiNative.startSoftAp] " + exception);
+        }
     }
 
     private boolean isConflictPrefix(Class<?> klass, Object thiz, IpPrefix prefix) throws Exception {
@@ -266,29 +297,30 @@ public class MainHook implements IXposedHookLoadPackage {
             }
         }
 
-        // Android 16-17: prevent hostapd from advertising the Soft AP as a
-        // CHARGEABLE_PUBLIC_NETWORK through the 802.11u Interworking IE.
+        // Android 16-17 loads the Wi-Fi service from a standalone APEX JAR.
+        // Wait for that service to load, then use its ClassLoader to hook WifiNative.
         if (Build.VERSION.SDK_INT >= 36 && "android".equals(lpparam.packageName)) {
             try {
-                Class<?> wifiNativeClass = classLoader.loadClass("com.android.server.wifi.WifiNative");
-                for (Method method : wifiNativeClass.getDeclaredMethods()) {
-                    Class<?>[] parameterTypes = method.getParameterTypes();
-                    if ("startSoftAp".equals(method.getName())
-                            && parameterTypes.length > 2
-                            && parameterTypes[2] == boolean.class) {
+                Class<?> systemServiceManagerClass = classLoader.loadClass(
+                        "com.android.server.SystemServiceManager");
+                for (Method method : systemServiceManagerClass.getDeclaredMethods()) {
+                    if ("startServiceFromJar".equals(method.getName())
+                            && method.getParameterTypes().length >= 2) {
                         XposedBridge.hookMethod(method, new XC_MethodHook() {
                             @Override
-                            protected void beforeHookedMethod(XC_MethodHook.MethodHookParam param) {
-                                param.args[2] = false;
-                                XposedBridge.log("[" + TAG + "] [Success Edit]: hostapd isMetered=false");
+                            protected void afterHookedMethod(XC_MethodHook.MethodHookParam param) {
+                                Object service = param.getResult();
+                                String jarPath = param.args[1] instanceof String
+                                        ? (String) param.args[1] : "";
+                                if (service != null && jarPath.contains("com.android.wifi")) {
+                                    hookWifiNativeStartSoftAp(service.getClass().getClassLoader());
+                                }
                             }
                         });
-                        XposedBridge.log("[" + TAG + "] [Success]: [WifiNative.startSoftAp] found in "
-                                + lpparam.processName);
                     }
                 }
             } catch (Exception exception) {
-                XposedBridge.log("[" + TAG + "] [Error]: [WifiNative.startSoftAp] " + exception);
+                XposedBridge.log("[" + TAG + "] [Error]: [SystemServiceManager] " + exception);
             }
         }
 

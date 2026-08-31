@@ -9,8 +9,8 @@ android {
         applicationId "com.xhy.xp.softaphelper"
         minSdk 23
         targetSdk 37
-        versionCode 1200
-        versionName "1.200"
+        versionCode 1201
+        versionName "1.200-beta.2"
     }
 
     buildTypes {
